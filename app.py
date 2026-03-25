@@ -1365,63 +1365,94 @@ def analyze_case(case_id):
 @app.route('/cases/<int:case_id>/download/report/pdf', methods=['GET'])
 @jwt_required()
 def download_report_pdf(case_id):
-    db = get_db_connection(); cursor = db.cursor(dictionary=True)
-    cursor.execute("SELECT c.*, r.* FROM cases c LEFT JOIN reports r ON c.id = r.case_id WHERE c.id = %s", (case_id,))
-    case = cursor.fetchone(); db.close()
-    if not case: return jsonify({"status": "error", "message": "Case not found"}), 404
+    db = None
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        query = """
+            SELECT c.*, r.deficiency_addressed, r.ai_reasoning, r.final_recommendation, 
+                   r.risk_analysis as report_risk, r.medications, r.care_instructions
+            FROM cases c 
+            LEFT JOIN reports r ON c.id = r.case_id 
+            WHERE c.id = %s
+        """
+        cursor.execute(query, (case_id,))
+        case = cursor.fetchone()
+        cursor.close()
+        db.close()
+        db = None # Mark as closed
+        
+        if not case:
+            return jsonify({"status": "error", "message": "Case not found"}), 404
 
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("helvetica", "B", 20)
-    pdf.cell(190, 10, "SmileAI Clinical Report", ln=True, align="C")
-    pdf.ln(10)
-    
-    pdf.set_font("helvetica", "B", 14)
-    pdf.cell(190, 10, f"Patient: {case['patient_first_name']} {case['patient_last_name']}", ln=True)
-    pdf.set_font("helvetica", "", 12)
-    pdf.cell(190, 10, f"Clinical ID: {case['patient_id'] or 'N/A'}", ln=True)
-    pdf.cell(190, 10, f"Date: {case['created_at']}", ln=True)
-    pdf.ln(5)
-    
-    pdf.set_font("helvetica", "B", 14)
-    pdf.cell(190, 10, "1. DIAGNOSIS", ln=True)
-    pdf.set_font("helvetica", "", 12)
-    pdf.multi_cell(190, 10, case['deficiency_addressed'] or case['ai_deficiency'] or "N/A")
-    
-    pdf.set_font("helvetica", "B", 14)
-    pdf.cell(190, 10, "2. CLINICAL REASONING", ln=True)
-    pdf.set_font("helvetica", "", 12)
-    reasoning = case['ai_reasoning'] or case['ai_report'] or "N/A"
-    pdf.multi_cell(190, 10, clean_text(reasoning))
-    
-    pdf.set_font("helvetica", "B", 14)
-    pdf.cell(190, 10, "3. RECOMMENDATION", ln=True)
-    pdf.set_font("helvetica", "", 12)
-    recommendation = case['final_recommendation'] or case['ai_recommendation'] or "N/A"
-    pdf.multi_cell(190, 10, clean_text(recommendation))
-    
-    pdf.set_font("helvetica", "B", 14)
-    pdf.cell(190, 10, "4. AI ANALYTICS", ln=True)
-    pdf.set_font("helvetica", "", 12)
-    pdf.cell(190, 10, f"Aesthetic Score: {case['ai_score']}%", ln=True)
-    symmetry = case['aesthetic_symmetry'] or 'Optimal'
-    pdf.cell(190, 10, f"Symmetry Status: {clean_text(symmetry)}", ln=True)
-    pdf.cell(190, 10, f"Golden Ratio Match: {case['golden_ratio'] or 'N/A'}", ln=True)
-    
-    pdf.ln(5)
-    pdf.set_font("helvetica", "B", 14)
-    pdf.cell(190, 10, "5. PROGNOSTIC ANALYSIS", ln=True)
-    pdf.set_font("helvetica", "", 12)
-    pdf.cell(190, 10, f"Risk Analysis: {case['risk_analysis'] or 'Low'}", ln=True)
-    pdf.cell(190, 10, f"Aesthetic Prognosis: {case['aesthetic_prognosis'] or 'Good'}", ln=True)
-    pdf.multi_cell(190, 10, f"Placement Strategy: {case['placement_strategy'] or 'Standard protocol.'}")
-    
-    pdf_content = pdf.output(dest='S')
-    output = io.BytesIO(pdf_content.encode('latin1') if isinstance(pdf_content, str) else pdf_content)
-    output.seek(0)
-    
-    from flask import send_file
-    return send_file(output, download_name=f"Report_Case_{case_id}.pdf", as_attachment=True, mimetype='application/pdf')
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 20)
+        pdf.cell(190, 10, "SmileAI Clinical Report", ln=True, align="C")
+        pdf.ln(10)
+        
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(190, 10, f"Patient: {case['patient_first_name']} {case['patient_last_name']}", ln=True)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(190, 10, f"Clinical ID: {case['patient_id'] or 'N/A'}", ln=True)
+        pdf.cell(190, 10, f"Date: {case['created_at']}", ln=True)
+        pdf.ln(5)
+        
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(190, 10, "1. DIAGNOSIS", ln=True)
+        pdf.set_font("Helvetica", "", 12)
+        diag = case['deficiency_addressed'] or case['ai_deficiency'] or "N/A"
+        pdf.multi_cell(190, 10, clean_text(str(diag)))
+        
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(190, 10, "2. CLINICAL REASONING", ln=True)
+        pdf.set_font("Helvetica", "", 12)
+        reasoning = case.get('ai_reasoning') or case.get('ai_report') or "N/A"
+        pdf.multi_cell(190, 10, clean_text(str(reasoning)))
+        
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(190, 10, "3. RECOMMENDATION", ln=True)
+        pdf.set_font("Helvetica", "", 12)
+        recommendation = case['final_recommendation'] or case['ai_recommendation'] or "N/A"
+        pdf.multi_cell(190, 10, clean_text(str(recommendation)))
+        
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(190, 10, "4. AI ANALYTICS", ln=True)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(190, 10, f"Aesthetic Score: {case['ai_score']}%", ln=True)
+        symmetry = case['aesthetic_symmetry'] or 'Optimal'
+        pdf.cell(190, 10, f"Symmetry Status: {clean_text(str(symmetry))}", ln=True)
+        pdf.cell(190, 10, f"Golden Ratio Match: {case['golden_ratio'] or 'N/A'}", ln=True)
+        
+        pdf.ln(5)
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(190, 10, "5. PROGNOSTIC ANALYSIS", ln=True)
+        pdf.set_font("Helvetica", "", 12)
+        risk = case.get('report_risk') or case.get('risk_analysis') or 'Low'
+        pdf.cell(190, 10, f"Risk Analysis: {clean_text(str(risk))}", ln=True)
+        prognosis = case.get('aesthetic_prognosis') or 'Good'
+        pdf.cell(190, 10, f"Aesthetic Prognosis: {clean_text(str(prognosis))}", ln=True)
+        strategy = case.get('placement_strategy') or 'Standard protocol.'
+        pdf.multi_cell(190, 10, f"Placement Strategy: {clean_text(str(strategy))}")
+        
+        # Output to buffer
+        pdf_content = pdf.output(dest='S')
+        if isinstance(pdf_content, str):
+            pdf_bytes = pdf_content.encode('latin1')
+        else:
+            pdf_bytes = pdf_content
+            
+        from flask import make_response
+        response = make_response(pdf_bytes)
+        response.headers.set('Content-Type', 'application/pdf')
+        response.headers.set('Content-Disposition', 'attachment', filename=f"Report_Case_{case_id}.pdf")
+        return response
+
+    except Exception as e:
+        if db:
+            db.close()
+        print(f"PDF ERROR for case {case_id}: {str(e)}")
+        return jsonify({"status": "error", "message": f"Failed to generate PDF: {str(e)}"}), 500
 
 @app.route('/cases/<int:case_id>/download/report/image', methods=['GET'])
 @jwt_required()
@@ -1487,7 +1518,11 @@ def download_smile_pdf(case_id):
 
     output = io.BytesIO()
     pdf_content = pdf.output(dest='S')
-    output.write(pdf_content)
+    # Use proper encoding for string output if needed
+    if isinstance(pdf_content, str):
+        output.write(pdf_content.encode('latin1'))
+    else:
+        output.write(pdf_content)
     output.seek(0)
     
     from flask import send_file
@@ -1561,7 +1596,6 @@ def get_timeline(case_id):
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         
-        # Fetch case to check existence
         cursor.execute("SELECT created_at, ai_score, status, patient_id FROM cases WHERE id = %s", (case_id,))
         case = cursor.fetchone()
         if not case:
@@ -1569,14 +1603,12 @@ def get_timeline(case_id):
             return jsonify({"status": "error", "message": "Case not found"}), 404
         
         timeline = []
-        # 1. Case Submitted
         timeline.append({
             "event_title": "Case Submitted",
             "event_description": "Initial scan and requirements received",
             "event_date": case['created_at'].strftime("%b %d, %I:%M %p") if case['created_at'] else "N/A"
         })
         
-        # 2. AI Analysis (if ai_score exists)
         if case['ai_score']:
             timeline.append({
                 "event_title": "AI Analysis Complete",
@@ -1584,7 +1616,6 @@ def get_timeline(case_id):
                 "event_date": "Completed"
             })
             
-        # 3. Report Finalized (if status is Done/Completed)
         if case['status'] in ['Done', 'Completed', 'Scheduled']:
              timeline.append({
                 "event_title": "Report Finalized",
@@ -1592,7 +1623,6 @@ def get_timeline(case_id):
                 "event_date": "Ready"
             })
         
-        # 4. Appointment Scheduled
         cursor.execute("SELECT appointment_date, appointment_day FROM appointments WHERE case_id = %s", (case_id,))
         app = cursor.fetchone()
         if app:
@@ -1604,6 +1634,56 @@ def get_timeline(case_id):
             
         conn.close()
         return jsonify({"status": "success", "timeline": timeline}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/appointments/patient/<string:patient_id>", methods=["GET"])
+@jwt_required()
+def get_patient_appointments(patient_id):
+    try:
+        norm_pid = normalize_patient_id(patient_id)
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        query = "SELECT * FROM appointments WHERE patient_id = %s ORDER BY appointment_date DESC LIMIT 1"
+        cursor.execute(query, (norm_pid,))
+        appointment = cursor.fetchone()
+        conn.close()
+        
+        if appointment:
+            return jsonify({"status": "success", "appointment": appointment}), 200
+        else:
+            return jsonify({"status": "error", "message": "No appointments found"}), 404
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/emergency-message", methods=["POST"])
+@jwt_required()
+def send_emergency_message():
+    data = request.get_json()
+    patient_id = data.get("patient_id")
+    message = data.get("message")
+    user_id = get_jwt_identity()
+
+    if not all([patient_id, message]):
+        return jsonify({"status": "error", "message": "Missing patient_id or message"}), 400
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT first_name, last_name FROM register WHERE id = %s", (user_id,))
+        patient = cursor.fetchone()
+        p_name = f"{patient['first_name']} {patient['last_name']}" if patient else "A patient"
+        
+        cursor.execute("SELECT id FROM register WHERE role = 'dentist'")
+        dentists = cursor.fetchall()
+        
+        notif_msg = f"EMERGENCY from {p_name}: {message}"
+        for d in dentists:
+            cursor.execute("INSERT INTO notifications (user_id, message) VALUES (%s, %s)", (d['id'], notif_msg))
+            
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "success", "message": "Emergency message sent and dentists notified"}), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
